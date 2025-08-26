@@ -26,7 +26,7 @@ export interface Player {
 export interface PlayerAction {
   playerId: string;
   type: 'BID' | 'PASS' | 'SELECT_CARD' | 'READY';
-  data?: any;
+  data?: {bidAmount?: number, cardId?: number};
   timestamp: Date;
 }
 
@@ -83,7 +83,14 @@ export interface GameEvent {
   gameId: string;
   type: GameEventType;
   playerId?: string;
-  data: any;
+  data: {
+    card?: {id: number, value: number};
+    propertyCard?: {id: number, value: number};
+    reason?: string;
+    summary?: Array<{playerId: string, playerName: string, propertyCard: {id: number, value: number}, moneyCard: {id: number, value: number} | null, moneyReceived: number}>;
+    round?: number;
+    results?: GameResult[];
+  };
   timestamp: Date;
 }
 

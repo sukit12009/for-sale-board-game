@@ -22,7 +22,6 @@ interface PlayerListProps {
 
 export function PlayerInfo({
   player,
-  isCurrentPlayer = false,
   isSelf = false,
   isCurrentTurn = false,
   showCards = false,

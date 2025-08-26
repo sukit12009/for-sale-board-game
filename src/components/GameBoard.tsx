@@ -4,11 +4,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { 
   GameState, 
-  Player, 
-  ForSaleServerToClientEvents, 
-  ForSaleClientToServerEvents,
-  GameEvent,
-  GameResult,
   SpectatorData
 } from '@/types/game';
 import { PropertyCardComponent, MoneyCardComponent, EmptyCardSlot } from './GameCard';
@@ -24,12 +19,12 @@ interface GameBoardProps {
 
 export default function GameBoard({ username, gameId, isSpectator = false }: GameBoardProps) {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [gameState, setGameState] = useState<any>(null);
-  const [spectatorData, setSpectatorData] = useState<any>(null);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [spectatorData, setSpectatorData] = useState<SpectatorData | null>(null);
   const [selfPlayerId, setSelfPlayerId] = useState<string>('');
   const [bidAmount, setBidAmount] = useState<number>(0);
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
-  const [gameResults, setGameResults] = useState<any[] | null>(null);
+  const [gameResults, setGameResults] = useState<Array<{playerId: string, username: string, finalScore: number, rank: number}> | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [error, setError] = useState<string>('');
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
@@ -38,7 +33,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
   const [resultPopup, setResultPopup] = useState<{
     isOpen: boolean;
     type: 'property' | 'money';
-    card: any;
+    card: {id: number, value: number} | null;
     title: string;
     message: string;
   }>({
@@ -52,7 +47,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
   // Selling Summary Popup State
   const [sellingSummaryPopup, setSellingSummaryPopup] = useState<{
     isOpen: boolean;
-    summary: any[];
+    summary: Array<{playerId: string, playerName: string, propertyCard: {id: number, value: number}, moneyCard: {id: number, value: number} | null, moneyReceived: number}>;
     round: number;
   }>({
     isOpen: false,
@@ -125,7 +120,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
         setIsReconnecting(false);
         
         // Find self player ID
-        const self = newGameState.players.find((p: any) => p.username === username);
+        const self = newGameState.players.find((p: {id: string, username: string}) => p.username === username);
         if (self) {
           console.log(`🔍 Setting selfPlayerId: ${self.id} for username: ${username}`);
           setSelfPlayerId(self.id);
@@ -494,8 +489,8 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
             <h1 className="text-3xl font-bold text-center mb-8">🎉 เกมจบแล้ว!</h1>
             
             <div className="space-y-4">
-              {gameResults.map((result: any, index: number) => {
-                const player = gameState.players.find((p: any) => p.id === result.playerId)!;
+                              {gameResults.map((result, index) => {
+                                  const player = gameState.players.find((p) => p.id === result.playerId)!;
                 return (
                   <PlayerSummary
                     key={result.playerId}
@@ -583,7 +578,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
       {/* Result Popup */}
       <ResultPopup
         isOpen={resultPopup.isOpen}
-        onClose={() => setResultPopup((prev: any) => ({ ...prev, isOpen: false }))}
+        onClose={() => setResultPopup((prev) => ({ ...prev, isOpen: false }))}
         type={resultPopup.type}
         card={resultPopup.card}
         title={resultPopup.title}
@@ -593,7 +588,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
       {/* Selling Summary Popup */}
       <SellingSummaryPopup
         isOpen={sellingSummaryPopup.isOpen}
-        onClose={() => setSellingSummaryPopup((prev: any) => ({ ...prev, isOpen: false }))}
+        onClose={() => setSellingSummaryPopup((prev) => ({ ...prev, isOpen: false }))}
         summary={sellingSummaryPopup.summary}
         round={sellingSummaryPopup.round}
       />

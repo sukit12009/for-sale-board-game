@@ -29,7 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       phase: gameState.phase,
       playerCount: gameState.players.length,
       maxPlayers: gameState.maxPlayers,
-      players: gameState.players.map((p: any) => ({
+      players: gameState.players.map((p: {username: string, isHost: boolean, isConnected: boolean}) => ({
         username: p.username,
         isHost: p.isHost,
         isConnected: p.isConnected

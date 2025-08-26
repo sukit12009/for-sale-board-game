@@ -6,10 +6,8 @@ import connectMongoDB from '@/lib/mongodb';
 import Game from '@/models/Game';
 import { 
   GameState, 
-  Player, 
   ForSaleServerToClientEvents, 
-  ForSaleClientToServerEvents,
-  GameEvent
+  ForSaleClientToServerEvents
 } from '@/types/game';
 import {
   createPlayer,

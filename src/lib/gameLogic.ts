@@ -2,9 +2,7 @@ import {
   GameState, 
   Player, 
   PropertyCard, 
-  MoneyCard, 
-  BiddingState, 
-  SellingState,
+  BiddingState,
   GameResult,
   CardDeck
 } from '@/types/game';
@@ -376,7 +374,7 @@ export function selectCardForSelling(gameState: GameState, playerId: string, car
   };
 }
 
-function resolveSellingRound(gameState: GameState, selectedCards: Record<string, PropertyCard>): GameState {
+export function resolveSellingRound(gameState: GameState, selectedCards: Record<string, PropertyCard>): GameState {
   // Sort players by their card values (highest first)
   const sortedPlayers = Object.entries(selectedCards)
     .sort(([, a], [, b]) => b.value - a.value)
