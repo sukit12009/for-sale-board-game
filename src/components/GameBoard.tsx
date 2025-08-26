@@ -563,7 +563,14 @@ function GameArea({
       {/* Card Selection Interface */}
       {data.phase === 'SELLING' && !isSpectator && selfPlayer && (
         <div className="bg-white rounded-lg shadow-lg p-6">
-          <h3 className="text-lg font-bold mb-4">🏠 เลือกบ้านที่จะขาย</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold">🏠 เลือกบ้านที่จะขาย</h3>
+            {gameState?.sellingState?.selectedCards[selfPlayerId || ''] && (
+              <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm">
+                กำลังขาย: บ้านหลัง {gameState.sellingState.selectedCards[selfPlayerId || ''].value}
+              </div>
+            )}
+          </div>
           
           <div className="grid grid-cols-3 md:grid-cols-5 gap-4">
             {selfPlayer.propertyCards.map((card) => (
@@ -586,6 +593,39 @@ function GameArea({
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Spectator View - Show all players' selected cards */}
+      {data.phase === 'SELLING' && isSpectator && gameState?.sellingState && (
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <h3 className="text-lg font-bold mb-4">👁️ การเลือกบ้านของผู้เล่น</h3>
+          
+          <div className="space-y-3">
+            {gameState.players.map((player) => {
+              const selectedCard = gameState.sellingState?.selectedCards[player.id];
+              return (
+                <div key={player.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-3 h-3 rounded-full ${player.isConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                    <span className="font-medium">{player.username}</span>
+                  </div>
+                  
+                  <div>
+                    {selectedCard ? (
+                      <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm">
+                        กำลังขาย: บ้านหลัง {selectedCard.value}
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 text-sm">
+                        กำลังเลือก...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
