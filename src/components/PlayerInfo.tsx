@@ -69,7 +69,7 @@ export function PlayerInfo({
       <div className={`grid ${compact ? 'grid-cols-2' : 'grid-cols-3'} gap-2 mb-3`}>
         <div className="bg-green-100 rounded-lg p-2 text-center">
           <div className={`font-bold text-green-800 ${compact ? 'text-sm' : 'text-lg'}`}>
-            ฿{player.money.toLocaleString()}
+            {showCards ? `฿${player.money.toLocaleString()}` : '฿???'}
           </div>
           <div className="text-xs text-green-600">เงินสด</div>
         </div>

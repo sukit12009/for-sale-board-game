@@ -547,13 +547,6 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
                   เริ่มเกม
                 </button>
               )}
-              
-              <button
-                onClick={leaveGame}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg"
-              >
-                ออกจากเกม
-              </button>
             </div>
           </div>
         </div>
