@@ -92,6 +92,15 @@ export default function handler(
   req: NextApiRequest,
   res: NextApiResponseWithSocket
 ) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
   if (!res.socket.server.io) {
     console.log('Initializing Socket.IO...');
     
@@ -102,8 +111,11 @@ export default function handler(
         addTrailingSlash: false,
         cors: {
           origin: "*",
-          methods: ["GET", "POST"]
-        }
+          methods: ["GET", "POST", "OPTIONS"],
+          credentials: true
+        },
+        transports: ['polling', 'websocket'],
+        allowEIO3: true
       }
     );
 

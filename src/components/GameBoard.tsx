@@ -62,7 +62,11 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
     const socketInstance = io({
       path: '/api/socket',
       forceNew: true,
-      transports: ['polling', 'websocket']
+      transports: ['polling', 'websocket'],
+      timeout: 20000,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
     });
 
     socketInstance.on('connect', () => {
@@ -84,6 +88,13 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
 
     socketInstance.on('connect_error', (error) => {
       console.error('🚨 [DEBUG] Socket connection error:', error);
+      console.error('🚨 [DEBUG] Error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+      setConnectionStatus('disconnected');
+      setError(`การเชื่อมต่อล้มเหลว: ${error.message}`);
     });
 
     socketInstance.on('disconnect', () => {
