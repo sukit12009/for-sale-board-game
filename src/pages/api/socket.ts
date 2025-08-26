@@ -9,8 +9,7 @@ import {
   Player, 
   ForSaleServerToClientEvents, 
   ForSaleClientToServerEvents,
-  GameEvent,
-  SpectatorData
+  GameEvent
 } from '@/types/game';
 import {
   createPlayer,
@@ -39,7 +38,6 @@ interface NextApiResponseWithSocket extends NextApiResponse {
 // In-memory game states for faster access
 const gameStates = new Map<string, GameState>();
 const playerConnections = new Map<string, string>(); // playerId -> socketId
-const spectatorConnections = new Map<string, string[]>(); // gameId -> socketIds[]
 
 async function saveGameState(gameState: GameState) {
   try {
@@ -67,6 +65,10 @@ async function loadGameState(gameId: string): Promise<GameState | null> {
     const gameDoc = await Game.findOne({ id: gameId });
     if (gameDoc) {
       const gameState = gameDoc.toGameState();
+      console.log(`Loaded game ${gameId}:`, {
+        phase: gameState.phase,
+        playerCount: gameState.players?.length || 0
+      });
       gameStates.set(gameId, gameState);
       return gameState;
     }
@@ -77,60 +79,12 @@ async function loadGameState(gameId: string): Promise<GameState | null> {
   }
 }
 
-function broadcastGameState(io: ServerIO, gameState: GameState) {
-  // Broadcast to all players
+function broadcastToPlayers(io: ServerIO, gameState: GameState) {
   gameState.players.forEach(player => {
     const socketId = playerConnections.get(player.id);
     if (socketId) {
       io.to(socketId).emit('game-state-updated', gameState);
     }
-  });
-
-  // Broadcast to spectators with limited data
-  const spectatorData: SpectatorData = {
-    gameId: gameState.id,
-    phase: gameState.phase,
-    players: gameState.players.map(p => ({
-      id: p.id,
-      username: p.username,
-      money: p.money,
-      propertyCardCount: p.propertyCards.length,
-      moneyCardCount: p.moneyCards.length,
-      isConnected: p.isConnected
-    })),
-    activePropertyCards: gameState.activePropertyCards,
-    activeMoneyCards: gameState.activeMoneyCards,
-    currentRound: gameState.currentRound,
-    biddingState: gameState.biddingState ? {
-      currentPlayerId: gameState.biddingState.currentPlayerId,
-      currentBid: gameState.biddingState.currentBid,
-      passedPlayers: gameState.biddingState.passedPlayers,
-      highestBidder: gameState.biddingState.highestBidder
-    } : undefined
-  };
-
-  const spectatorSockets = spectatorConnections.get(gameState.id) || [];
-  spectatorSockets.forEach(socketId => {
-    io.to(socketId).emit('spectator-update', spectatorData);
-  });
-}
-
-function broadcastGameEvent(io: ServerIO, event: GameEvent) {
-  const gameState = gameStates.get(event.gameId);
-  if (!gameState) return;
-
-  // Broadcast to all connected players
-  gameState.players.forEach(player => {
-    const socketId = playerConnections.get(player.id);
-    if (socketId) {
-      io.to(socketId).emit('game-event', event);
-    }
-  });
-
-  // Broadcast to spectators
-  const spectatorSockets = spectatorConnections.get(event.gameId) || [];
-  spectatorSockets.forEach(socketId => {
-    io.to(socketId).emit('game-event', event);
   });
 }
 
@@ -156,125 +110,129 @@ export default function handler(
     res.socket.server.io = io;
 
     io.on('connection', (socket) => {
-      console.log('Client connected:', socket.id);
+      console.log('New client connected:', socket.id);
 
       // Create Game
       socket.on('create-game', async (data) => {
         try {
-          const { username, maxPlayers = 6, autoStart = false } = data;
+          const { username } = data;
+          console.log(`Creating game for: ${username}`);
           
           const hostPlayer = createPlayer(username, true);
-          const gameState = initializeGame(hostPlayer, maxPlayers);
-          gameState.autoStart = autoStart;
+          const gameState = initializeGame(hostPlayer, 6);
 
           await saveGameState(gameState);
           playerConnections.set(hostPlayer.id, socket.id);
 
           socket.emit('game-state-updated', gameState);
-
-          const event: GameEvent = {
-            id: Date.now().toString(),
-            gameId: gameState.id,
-            type: 'PLAYER_JOINED',
-            playerId: hostPlayer.id,
-            data: { username },
-            timestamp: new Date()
-          };
-          broadcastGameEvent(io, event);
-
-          console.log(`Game created: ${gameState.id} by ${username}`);
+          console.log(`Game created: ${gameState.id}`);
         } catch (error) {
           console.error('Error creating game:', error);
-          socket.emit('error', { message: 'Failed to create game' });
+          socket.emit('error', { 
+            message: 'ไม่สามารถสร้างเกมได้',
+            code: 'CREATE_ERROR'
+          });
         }
       });
 
-      // Join Game
+      // Join Game - FIXED VERSION
       socket.on('join-game', async (data) => {
         try {
+          console.log(`🔍 Raw join data:`, data);
           const { gameId, username, isSpectator = false } = data;
+          console.log(`🔍 Parsed: gameId=${gameId}, username=${username}, isSpectator=${isSpectator} (type: ${typeof isSpectator})`);
           
           const gameState = await loadGameState(gameId);
           if (!gameState) {
-            socket.emit('error', { message: 'Game not found', code: 'GAME_NOT_FOUND' });
+            console.log(`❌ Game ${gameId} not found`);
+            socket.emit('error', { message: 'ไม่พบเกม', code: 'GAME_NOT_FOUND' });
             return;
           }
 
-          if (isSpectator) {
-            // Add spectator
-            if (!spectatorConnections.has(gameId)) {
-              spectatorConnections.set(gameId, []);
+          // SPECTATOR MODE - ไม่เช็กสิทธิ์ เข้าดูได้ตลอด (ต้องเช็กก่อน existing player)
+          if (isSpectator === true) {
+            console.log(`✅ SPECTATOR MODE ACTIVATED: ${username} → ${gameId}`);
+            console.log(`Game phase: ${gameState.phase}, Players: ${gameState.players.length}`);
+            
+            // Send complete game state to spectator (can see everything)
+            socket.emit('game-state-updated', gameState);
+            
+            console.log(`✅ Spectator ${username} successfully joined game ${gameId} - DONE!`);
+            return;
+          }
+          
+          console.log(`🎮 PLAYER MODE: ${username} → ${gameId}`);
+
+          // Look for existing player with same username (เฉพาะ non-spectator)
+          const existingPlayer = gameState.players.find(p => p.username === username);
+          
+          if (existingPlayer) {
+            // RECONNECT: Take over existing player
+            console.log(`Reconnecting ${username} to game ${gameId}`);
+            
+            // Update player status
+            existingPlayer.isConnected = true;
+            existingPlayer.lastActivity = new Date();
+            
+            // Handle old connection
+            const oldSocketId = playerConnections.get(existingPlayer.id);
+            if (oldSocketId && oldSocketId !== socket.id) {
+              playerConnections.delete(existingPlayer.id);
+              io.to(oldSocketId).emit('error', { 
+                message: 'การเชื่อมต่อถูกแทนที่',
+                code: 'REPLACED' 
+              });
             }
-            spectatorConnections.get(gameId)!.push(socket.id);
-
-            // Send spectator data
-            const spectatorData: SpectatorData = {
-              gameId: gameState.id,
-              phase: gameState.phase,
-              players: gameState.players.map(p => ({
-                id: p.id,
-                username: p.username,
-                money: p.money,
-                propertyCardCount: p.propertyCards.length,
-                moneyCardCount: p.moneyCards.length,
-                isConnected: p.isConnected
-              })),
-              activePropertyCards: gameState.activePropertyCards,
-              activeMoneyCards: gameState.activeMoneyCards,
-              currentRound: gameState.currentRound,
-              biddingState: gameState.biddingState ? {
-                currentPlayerId: gameState.biddingState.currentPlayerId,
-                currentBid: gameState.biddingState.currentBid,
-                passedPlayers: gameState.biddingState.passedPlayers,
-                highestBidder: gameState.biddingState.highestBidder
-              } : undefined
-            };
-            socket.emit('spectator-update', spectatorData);
-            return;
+            
+            // Set new connection
+            playerConnections.set(existingPlayer.id, socket.id);
+            
+            // Send game state
+            socket.emit('game-state-updated', gameState);
+            
+            // Broadcast to others
+            broadcastToPlayers(io, gameState);
+            
+            console.log(`${username} successfully reconnected to ${gameId}`);
+            
+          } else {
+            // NEW PLAYER: Check if can join
+            if (gameState.phase !== 'LOBBY') {
+              socket.emit('error', { 
+                message: 'เกมเริ่มแล้ว - ใช้ชื่อผู้เล่นที่มีอยู่เพื่อเข้าร่วม',
+                code: 'GAME_STARTED_NEW_PLAYER' 
+              });
+              return;
+            }
+            
+            if (gameState.players.length >= gameState.maxPlayers) {
+              socket.emit('error', { message: 'เกมเต็มแล้ว', code: 'GAME_FULL' });
+              return;
+            }
+            
+            // Add new player
+            const newPlayer = createPlayer(username, false);
+            gameState.players.push(newPlayer);
+            gameState.lastActivity = new Date();
+            
+            await saveGameState(gameState);
+            playerConnections.set(newPlayer.id, socket.id);
+            
+            // Send game state
+            socket.emit('game-state-updated', gameState);
+            
+            // Broadcast to others
+            broadcastToPlayers(io, gameState);
+            
+            console.log(`New player ${username} joined ${gameId}`);
           }
-
-          // Check if game is full
-          if (gameState.players.length >= gameState.maxPlayers) {
-            socket.emit('error', { message: 'Game is full', code: 'GAME_FULL' });
-            return;
-          }
-
-          // Check if game already started
-          if (gameState.phase !== 'LOBBY') {
-            socket.emit('error', { message: 'Game already started', code: 'GAME_STARTED' });
-            return;
-          }
-
-          // Check if username is taken
-          if (gameState.players.some(p => p.username === username)) {
-            socket.emit('error', { message: 'Username already taken', code: 'USERNAME_TAKEN' });
-            return;
-          }
-
-          // Add player to game
-          const newPlayer = createPlayer(username, false);
-          gameState.players.push(newPlayer);
-          gameState.lastActivity = new Date();
-
-          await saveGameState(gameState);
-          playerConnections.set(newPlayer.id, socket.id);
-
-          broadcastGameState(io, gameState);
-
-          const event: GameEvent = {
-            id: Date.now().toString(),
-            gameId: gameState.id,
-            type: 'PLAYER_JOINED',
-            playerId: newPlayer.id,
-            data: { username },
-            timestamp: new Date()
-          };
-          broadcastGameEvent(io, event);
-
-          console.log(`Player joined: ${username} in game ${gameId}`);
+          
         } catch (error) {
-          console.error('Error joining game:', error);
-          socket.emit('error', { message: 'Failed to join game' });
+          console.error('Error in join-game:', error);
+          socket.emit('error', { 
+            message: 'ไม่สามารถเข้าร่วมเกมได้',
+            code: 'JOIN_ERROR'
+          });
         }
       });
 
@@ -283,42 +241,31 @@ export default function handler(
         try {
           const gameState = await loadGameState(gameId);
           if (!gameState) {
-            socket.emit('error', { message: 'Game not found' });
+            socket.emit('error', { message: 'ไม่พบเกม' });
             return;
           }
 
-          // Check if player is host
           const playerId = Array.from(playerConnections.entries())
             .find(([, socketId]) => socketId === socket.id)?.[0];
           
           if (!playerId || gameState.hostId !== playerId) {
-            socket.emit('error', { message: 'Only host can start the game' });
+            socket.emit('error', { message: 'เฉพาะ Host เท่านั้นที่เริ่มเกมได้' });
             return;
           }
 
           if (!canStartGame(gameState)) {
-            socket.emit('error', { message: 'Cannot start game: invalid conditions' });
+            socket.emit('error', { message: 'ไม่สามารถเริ่มเกมได้ - ต้องมีผู้เล่นอย่างน้อย 2 คน' });
             return;
           }
 
           const updatedGameState = startGame(gameState);
           await saveGameState(updatedGameState);
 
-          broadcastGameState(io, updatedGameState);
-
-          const event: GameEvent = {
-            id: Date.now().toString(),
-            gameId: gameState.id,
-            type: 'GAME_STARTED',
-            data: {},
-            timestamp: new Date()
-          };
-          broadcastGameEvent(io, event);
-
-          console.log(`Game started: ${gameId}`);
+          broadcastToPlayers(io, updatedGameState);
+          console.log(`Game ${gameId} started`);
         } catch (error) {
           console.error('Error starting game:', error);
-          socket.emit('error', { message: 'Failed to start game' });
+          socket.emit('error', { message: 'ไม่สามารถเริ่มเกมได้' });
         }
       });
 
@@ -326,44 +273,24 @@ export default function handler(
       socket.on('place-bid', async (data) => {
         try {
           const { gameId, bid } = data;
-          
           const gameState = await loadGameState(gameId);
-          if (!gameState) {
-            socket.emit('error', { message: 'Game not found' });
-            return;
-          }
+          if (!gameState) return;
 
           const playerId = Array.from(playerConnections.entries())
             .find(([, socketId]) => socketId === socket.id)?.[0];
           
-          if (!playerId) {
-            socket.emit('error', { message: 'Player not found' });
-            return;
-          }
-
-          if (!canPlaceBid(gameState, playerId, bid)) {
-            socket.emit('error', { message: 'Invalid bid' });
+          if (!playerId || !canPlaceBid(gameState, playerId, bid)) {
+            socket.emit('error', { message: 'ไม่สามารถประมูลได้' });
             return;
           }
 
           const updatedGameState = placeBid(gameState, playerId, bid);
           await saveGameState(updatedGameState);
-
-          broadcastGameState(io, updatedGameState);
-
-          const event: GameEvent = {
-            id: Date.now().toString(),
-            gameId: gameState.id,
-            type: 'BID_PLACED',
-            playerId,
-            data: { bid },
-            timestamp: new Date()
-          };
-          broadcastGameEvent(io, event);
+          broadcastToPlayers(io, updatedGameState);
 
         } catch (error) {
           console.error('Error placing bid:', error);
-          socket.emit('error', { message: 'Failed to place bid' });
+          socket.emit('error', { message: 'ไม่สามารถประมูลได้' });
         }
       });
 
@@ -371,80 +298,65 @@ export default function handler(
       socket.on('pass-bid', async (gameId) => {
         try {
           const gameState = await loadGameState(gameId);
-          if (!gameState) {
-            socket.emit('error', { message: 'Game not found' });
-            return;
-          }
+          if (!gameState) return;
 
           const playerId = Array.from(playerConnections.entries())
             .find(([, socketId]) => socketId === socket.id)?.[0];
           
           if (!playerId) {
-            socket.emit('error', { message: 'Player not found' });
+            socket.emit('error', { message: 'ไม่พบผู้เล่น' });
             return;
           }
 
           const updatedGameState = passPlayer(gameState, playerId);
           await saveGameState(updatedGameState);
-
-          broadcastGameState(io, updatedGameState);
-
-          const event: GameEvent = {
-            id: Date.now().toString(),
-            gameId: gameState.id,
-            type: 'PLAYER_PASSED',
-            playerId,
-            data: {},
-            timestamp: new Date()
-          };
-          broadcastGameEvent(io, event);
+          broadcastToPlayers(io, updatedGameState);
 
         } catch (error) {
           console.error('Error passing bid:', error);
-          socket.emit('error', { message: 'Failed to pass' });
+          socket.emit('error', { message: 'ไม่สามารถยอมแพ้ได้' });
         }
       });
 
-      // Select Card for Selling
+      // Select Card
       socket.on('select-card', async (data) => {
         try {
           const { gameId, cardId } = data;
-          
           const gameState = await loadGameState(gameId);
-          if (!gameState) {
-            socket.emit('error', { message: 'Game not found' });
-            return;
-          }
+          if (!gameState) return;
 
           const playerId = Array.from(playerConnections.entries())
             .find(([, socketId]) => socketId === socket.id)?.[0];
           
           if (!playerId) {
-            socket.emit('error', { message: 'Player not found' });
+            socket.emit('error', { message: 'ไม่พบผู้เล่น' });
             return;
           }
 
           const updatedGameState = selectCardForSelling(gameState, playerId, cardId);
           await saveGameState(updatedGameState);
-
-          broadcastGameState(io, updatedGameState);
+          broadcastToPlayers(io, updatedGameState);
 
           // Check if game finished
           if (updatedGameState.phase === 'FINISHED') {
             const results = calculateFinalScores(updatedGameState);
-            const event: GameEvent = {
-              id: Date.now().toString(),
-              gameId: gameState.id,
-              type: 'GAME_FINISHED',
-              data: { results },
-              timestamp: new Date()
-            };
-            broadcastGameEvent(io, event);
+            gameState.players.forEach(player => {
+              const socketId = playerConnections.get(player.id);
+              if (socketId) {
+                io.to(socketId).emit('game-event', {
+                  id: Date.now().toString(),
+                  gameId: gameState.id,
+                  type: 'GAME_FINISHED',
+                  data: { results },
+                  timestamp: new Date()
+                });
+              }
+            });
           }
 
         } catch (error) {
           console.error('Error selecting card:', error);
-          socket.emit('error', { message: 'Failed to select card' });
+          socket.emit('error', { message: 'ไม่สามารถเลือกการ์ดได้' });
         }
       });
 
@@ -458,42 +370,17 @@ export default function handler(
             .find(([, socketId]) => socketId === socket.id)?.[0];
 
           if (playerId) {
-            // Remove player from game
-            gameState.players = gameState.players.filter(p => p.id !== playerId);
+            // Mark as disconnected
+            const player = gameState.players.find(p => p.id === playerId);
+            if (player) {
+              player.isConnected = false;
+              player.lastActivity = new Date();
+            }
+            
             playerConnections.delete(playerId);
-
-            // If host left, make another player host
-            if (gameState.hostId === playerId && gameState.players.length > 0) {
-              gameState.hostId = gameState.players[0].id;
-              gameState.players[0].isHost = true;
-            }
-
             await saveGameState(gameState);
-            broadcastGameState(io, gameState);
-
-            const event: GameEvent = {
-              id: Date.now().toString(),
-              gameId: gameState.id,
-              type: 'PLAYER_LEFT',
-              playerId,
-              data: {},
-              timestamp: new Date()
-            };
-            broadcastGameEvent(io, event);
+            broadcastToPlayers(io, gameState);
           }
-
-          // Remove spectator
-          const spectators = spectatorConnections.get(gameId);
-          if (spectators) {
-            const index = spectators.indexOf(socket.id);
-            if (index > -1) {
-              spectators.splice(index, 1);
-              if (spectators.length === 0) {
-                spectatorConnections.delete(gameId);
-              }
-            }
-          }
-
         } catch (error) {
           console.error('Error leaving game:', error);
         }
@@ -503,27 +390,23 @@ export default function handler(
       socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
         
-        // Find and handle player disconnection
         const playerId = Array.from(playerConnections.entries())
           .find(([, socketId]) => socketId === socket.id)?.[0];
         
         if (playerId) {
-          // Mark player as disconnected but don't remove immediately
-          // They might reconnect
           playerConnections.delete(playerId);
-          // TODO: Implement reconnection logic
-        }
-
-        // Remove from spectator connections
-        spectatorConnections.forEach((sockets, gameId) => {
-          const index = sockets.indexOf(socket.id);
-          if (index > -1) {
-            sockets.splice(index, 1);
-            if (sockets.length === 0) {
-              spectatorConnections.delete(gameId);
+          
+          // Mark player as disconnected in all games
+          gameStates.forEach(async (gameState) => {
+            const player = gameState.players.find(p => p.id === playerId);
+            if (player) {
+              player.isConnected = false;
+              player.lastActivity = new Date();
+              await saveGameState(gameState);
+              broadcastToPlayers(io, gameState);
             }
-          }
-        });
+          });
+        }
       });
     });
   }

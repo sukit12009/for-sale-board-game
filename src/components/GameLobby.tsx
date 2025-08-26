@@ -17,6 +17,8 @@ export default function GameLobby({
 }: GameLobbyProps) {
   const [gameId, setGameId] = useState('');
   const [showJoinForm, setShowJoinForm] = useState(false);
+  const [gameInfo, setGameInfo] = useState<any>(null);
+  const [loadingGameInfo, setLoadingGameInfo] = useState(false);
 
   const handleJoinGame = () => {
     if (gameId.trim()) {
@@ -27,6 +29,37 @@ export default function GameLobby({
   const handleJoinAsSpectator = () => {
     if (gameId.trim()) {
       onJoinAsSpectator(gameId.trim().toUpperCase());
+    }
+  };
+
+  // Fetch game info when game ID changes
+  const fetchGameInfo = async (id: string) => {
+    if (id.length >= 3) {
+      setLoadingGameInfo(true);
+      try {
+        const response = await fetch(`/api/game-info?gameId=${id}`);
+        if (response.ok) {
+          const info = await response.json();
+          setGameInfo(info);
+        } else {
+          setGameInfo(null);
+        }
+      } catch (error) {
+        setGameInfo(null);
+      }
+      setLoadingGameInfo(false);
+    } else {
+      setGameInfo(null);
+    }
+  };
+
+  const handleGameIdChange = (value: string) => {
+    const upperValue = value.toUpperCase();
+    setGameId(upperValue);
+    if (upperValue.length >= 3) {
+      fetchGameInfo(upperValue);
+    } else {
+      setGameInfo(null);
     }
   };
 
@@ -72,7 +105,7 @@ export default function GameLobby({
           {/* Join Game Form */}
           {showJoinForm && (
             <div className="bg-gray-50 rounded-lg p-4 space-y-3 animate-fadeIn">
-              <div>
+                             <div>
                 <label htmlFor="gameId" className="block text-sm font-medium text-gray-700 mb-2">
                   รหัสเกม (Game ID)
                 </label>
@@ -80,27 +113,93 @@ export default function GameLobby({
                   type="text"
                   id="gameId"
                   value={gameId}
-                  onChange={(e) => setGameId(e.target.value.toUpperCase())}
+                  onChange={(e) => handleGameIdChange(e.target.value)}
                   placeholder="เช่น ABC123"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-center text-lg"
                   maxLength={6}
                 />
+                
+                {/* Game Info Display */}
+                {loadingGameInfo && (
+                  <div className="mt-2 text-center text-gray-500 text-sm">
+                    🔍 กำลังค้นหาเกม...
+                  </div>
+                )}
+                
+                {gameInfo && (
+                  <div className="mt-2 bg-green-50 rounded-lg p-3">
+                    <div className="text-sm text-green-800">
+                      <div className="font-bold mb-1">✅ พบเกม: {gameInfo.id}</div>
+                      <div>📊 สถานะ: {
+                        gameInfo.phase === 'LOBBY' ? 'รอผู้เล่น' :
+                        gameInfo.phase === 'BUYING' ? 'ประมูลซื้อบ้าน' :
+                        gameInfo.phase === 'SELLING' ? 'ขายบ้าน' : 'จบเกมแล้ว'
+                      }</div>
+                      <div>👥 ผู้เล่น: {gameInfo.playerCount}/{gameInfo.maxPlayers}</div>
+                      
+                      {gameInfo.players.length > 0 && (
+                        <div className="mt-2">
+                          <div className="font-medium mb-1">ผู้เล่นในเกม:</div>
+                          <div className="flex flex-wrap gap-1">
+                            {gameInfo.players.map((player: any, index: number) => (
+                              <span 
+                                key={index}
+                                className={`text-xs px-2 py-1 rounded-full ${
+                                  player.username === username 
+                                    ? 'bg-blue-200 text-blue-800 font-bold' 
+                                    : player.isConnected 
+                                      ? 'bg-green-200 text-green-800'
+                                      : 'bg-gray-200 text-gray-600'
+                                }`}
+                              >
+                                {player.username}
+                                {player.isHost && ' 👑'}
+                                {!player.isConnected && ' 💤'}
+                                {player.username === username && ' (คุณ)'}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {gameId.length >= 3 && !loadingGameInfo && !gameInfo && (
+                  <div className="mt-2 text-center text-red-500 text-sm">
+                    ❌ ไม่พบเกม
+                  </div>
+                )}
+                
+                <div className="text-xs text-gray-500 mt-2 space-y-1">
+                  <p>💡 หากใช้ชื่อเดียวกันกับคนในเกม จะเข้าไปเล่นแทนได้เลย</p>
+                  {gameInfo && gameInfo.phase !== 'LOBBY' && (
+                    <p className="text-orange-600 font-medium">
+                      ⚠️ เกมนี้เริ่มแล้ว - ผู้เล่นใหม่เข้าไม่ได้ (ใช้ชื่อเดิมเท่านั้น)
+                    </p>
+                  )}
+                </div>
               </div>
               
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={handleJoinGame}
-                  disabled={!gameId.trim()}
+                  disabled={!gameId.trim() || loadingGameInfo}
                   className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200"
                 >
-                  เล่น
+                  {gameInfo && gameInfo.players.some((p: any) => p.username === username) 
+                    ? '🔄 เล่นต่อ' 
+                    : gameInfo && gameInfo.phase !== 'LOBBY'
+                      ? '⚠️ เข้าร่วม'
+                      : '🎮 เล่น'
+                  }
                 </button>
                 <button
                   onClick={handleJoinAsSpectator}
-                  disabled={!gameId.trim()}
+                  disabled={!gameId.trim() || loadingGameInfo}
                   className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200"
                 >
-                  ดู
+                  👁️ ดู
                 </button>
               </div>
             </div>

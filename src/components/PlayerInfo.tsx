@@ -33,6 +33,9 @@ export function PlayerInfo({
   const totalMoneyValue = player.moneyCards.reduce((sum, card) => sum + card.value, 0);
   const totalScore = player.money + totalMoneyValue;
 
+  // Debug log
+  console.log(`👤 PlayerInfo: ${player.username} - showCards: ${showCards}, isSelf: ${isSelf}, moneyCards: ${player.moneyCards.length}`);
+
   return (
     <div
       className={`
@@ -198,17 +201,22 @@ export function PlayerList({
         ผู้เล่น ({players.length} คน)
       </h2>
       
-      {players.map((player) => (
-        <PlayerInfo
-          key={player.id}
-          player={player}
-          isCurrentPlayer={currentPlayerId === player.id}
-          isSelf={selfPlayerId === player.id}
-          isCurrentTurn={currentPlayerId === player.id}
-          showCards={spectatorMode || selfPlayerId === player.id}
-          compact={players.length > 4}
-        />
-      ))}
+      {players.map((player) => {
+        const shouldShowCards = spectatorMode || selfPlayerId === player.id;
+        console.log(`🎭 PlayerList: ${player.username} - spectatorMode: ${spectatorMode}, selfPlayerId: "${selfPlayerId}", shouldShowCards: ${shouldShowCards}`);
+        
+        return (
+          <PlayerInfo
+            key={player.id}
+            player={player}
+            isCurrentPlayer={currentPlayerId === player.id}
+            isSelf={selfPlayerId === player.id}
+            isCurrentTurn={currentPlayerId === player.id}
+            showCards={shouldShowCards}
+            compact={players.length > 4}
+          />
+        );
+      })}
     </div>
   );
 }

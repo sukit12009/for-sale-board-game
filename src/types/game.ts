@@ -89,6 +89,7 @@ export interface GameEvent {
 
 export type GameEventType = 
   | 'PLAYER_JOINED'
+  | 'PLAYER_RECONNECTED'
   | 'PLAYER_LEFT'
   | 'GAME_STARTED'
   | 'PHASE_CHANGED'
@@ -108,6 +109,7 @@ export interface ForSaleServerToClientEvents {
   'player-left': (playerId: string) => void;
   'error': (error: { message: string; code?: string }) => void;
   'spectator-update': (data: SpectatorData) => void;
+  'reconnected': (data: { message: string; gamePhase: GamePhase }) => void;
 }
 
 export interface ForSaleClientToServerEvents {

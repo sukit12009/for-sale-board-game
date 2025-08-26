@@ -30,6 +30,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
   const [gameResults, setGameResults] = useState<any[] | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [error, setError] = useState<string>('');
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
 
   // Initialize Socket Connection
   useEffect(() => {
@@ -43,7 +44,8 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
       
       if (gameId) {
         // Join existing game
-        console.log('Joining game:', gameId);
+        console.log(`🔗 Joining game: ${gameId} as ${username} (spectator: ${isSpectator})`);
+        setIsReconnecting(true);
         socketInstance.emit('join-game', { gameId, username, isSpectator });
       } else if (!isSpectator) {
         // Create new game
@@ -57,12 +59,33 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
     });
 
     socketInstance.on('error', (error) => {
-      setError(error.message);
+      console.error('Socket error:', error);
+      
+      // Handle empty error objects
+      if (!error || typeof error !== 'object') {
+        console.error('Invalid error object received');
+        return;
+      }
+      
+      // Handle different error types
+      if (error.code === 'GAME_STARTED_NEW_PLAYER') {
+        setError(`${error.message}\n\n💡 วิธีแก้: ใช้ชื่อผู้เล่นที่มีอยู่ในเกมเพื่อเข้าไปเล่นต่อ`);
+      } else if (error.code === 'REPLACED') {
+        // Don't show error for replacement, just reload
+        console.log('Connection replaced, reloading...');
+        window.location.reload();
+      } else if (error.message) {
+        setError(error.message);
+      } else {
+        console.error('Unknown error format:', error);
+        setError('เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
+      }
     });
 
     socketInstance.on('game-state-updated', (newGameState) => {
       console.log('Game state updated:', newGameState);
       setGameState(newGameState);
+      setIsReconnecting(false);
       
       // Find self player ID
       const self = newGameState.players.find((p: any) => p.username === username);
@@ -81,6 +104,17 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
       if (event.type === 'GAME_FINISHED') {
         setGameResults(event.data.results);
       }
+      
+      // Show reconnection message
+      if (event.type === 'PLAYER_RECONNECTED' && event.data.username === username) {
+        console.log('Successfully reconnected to game!');
+      }
+    });
+
+    socketInstance.on('reconnected', (data) => {
+      console.log('Reconnection successful:', data);
+      setIsReconnecting(false);
+      // Could show a toast notification here
     });
 
     // Listen for simple events for debugging
@@ -96,6 +130,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
         currentRound: game.currentRound || 0
       };
       setGameState(compatibleGame);
+      setIsReconnecting(false);
       // Find self player ID
       const self = compatibleGame.players.find((p: any) => p.username === username);
       if (self) {
@@ -115,6 +150,7 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
         currentRound: game.currentRound || 0
       };
       setGameState(compatibleGame);
+      setIsReconnecting(false);
       // Find self player ID
       const self = compatibleGame.players.find((p: any) => p.username === username);
       if (self) {
@@ -164,7 +200,16 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
   if (connectionStatus === 'connecting') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center">
-        <div className="text-white text-xl">เชื่อมต่อเซิร์ฟเวอร์...</div>
+        <div className="text-white text-center">
+          <div className="text-xl mb-2">
+            {isReconnecting ? 'กำลังเข้าร่วมเกม...' : 'เชื่อมต่อเซิร์ฟเวอร์...'}
+          </div>
+          {isReconnecting && (
+            <div className="text-sm opacity-80">
+              หากคุณเคยอยู่ในเกมนี้แล้ว จะเข้าไปเล่นต่อได้เลย
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -187,32 +232,53 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center">
-        <div className="bg-white rounded-lg p-8 text-center max-w-md">
+      <div className="min-h-screen bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg p-8 text-center max-w-lg">
           <h1 className="text-2xl font-bold text-red-600 mb-4">เกิดข้อผิดพลาด</h1>
-          <p className="text-gray-700 mb-4">{error}</p>
-          <button 
-            onClick={() => window.location.href = '/'}
-            className="bg-red-600 text-white px-6 py-2 rounded-lg font-semibold"
-          >
-            กลับหน้าหลัก
-          </button>
+          <div className="text-gray-700 mb-6 whitespace-pre-line">{error}</div>
+          
+          {gameId && (
+            <div className="bg-blue-50 rounded-lg p-4 mb-4">
+              <h3 className="font-bold text-blue-800 mb-2">🎮 เกม: {gameId}</h3>
+              <p className="text-sm text-blue-700">
+                ลองใช้ชื่อผู้เล่นที่มีอยู่ในเกมนี้เพื่อเข้าไปเล่นต่อ
+              </p>
+            </div>
+          )}
+          
+          <div className="space-y-2">
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold"
+            >
+              ลองใหม่
+            </button>
+            <button 
+              onClick={() => window.location.href = '/'}
+              className="w-full bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg font-semibold"
+            >
+              กลับหน้าหลัก
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Spectator View
-  if (isSpectator && spectatorData) {
+  // Spectator View - เห็นทุกอย่าง!
+  if (isSpectator && gameState) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-100 to-blue-100 p-4">
         <div className="max-w-7xl mx-auto">
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             <h1 className="text-2xl font-bold text-center mb-4">
-              🎮 For Sale - โหมดผู้ชม
+              👁️ For Sale - โหมดผู้ชม
             </h1>
-            <div className="text-center text-gray-600">
-              เกม ID: <span className="font-mono font-bold">{spectatorData.gameId}</span>
+            <div className="text-center text-gray-600 space-y-2">
+              <div>เกม ID: <span className="font-mono font-bold">{gameState.id}</span></div>
+              <div className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full inline-block">
+                🔍 คุณสามารถเห็นการ์ดและเงินของทุกคน
+              </div>
             </div>
           </div>
 
@@ -220,24 +286,19 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
             {/* Game Area */}
             <div className="lg:col-span-2">
               <GameArea 
-                gameState={null}
-                spectatorData={spectatorData}
+                gameState={gameState}
                 isSpectator={true}
+                selfPlayerId="" // No self player for spectators
               />
             </div>
 
-            {/* Players */}
+            {/* Players - Show all cards and money */}
             <div>
               <PlayerList
-                players={spectatorData.players.map((p: any) => ({
-                  ...p,
-                  propertyCards: [],
-                  moneyCards: [],
-                  isHost: false,
-                  lastActivity: new Date()
-                }))}
-                currentPlayerId={spectatorData.biddingState?.currentPlayerId}
-                spectatorMode={true}
+                players={gameState.players}
+                currentPlayerId={gameState.biddingState?.currentPlayerId}
+                selfPlayerId="" // Show all players' cards
+                spectatorMode={true} // Show everything
               />
             </div>
           </div>
