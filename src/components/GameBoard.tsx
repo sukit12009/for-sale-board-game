@@ -14,6 +14,7 @@ import {
 import { PropertyCardComponent, MoneyCardComponent, EmptyCardSlot } from './GameCard';
 import { PlayerList, PlayerSummary } from './PlayerInfo';
 import ResultPopup from './ResultPopup';
+import SellingSummaryPopup from './SellingSummaryPopup';
 
 interface GameBoardProps {
   username: string;
@@ -46,6 +47,17 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
     card: null,
     title: '',
     message: ''
+  });
+
+  // Selling Summary Popup State
+  const [sellingSummaryPopup, setSellingSummaryPopup] = useState<{
+    isOpen: boolean;
+    summary: any[];
+    round: number;
+  }>({
+    isOpen: false,
+    summary: [],
+    round: 0
   });
 
   // Initialize Socket Connection
@@ -227,6 +239,23 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
           }
         } else {
           console.log(`❌ Event not for current player (${event.playerId} !== ${selfPlayerId})`);
+        }
+
+        // Show selling summary to everyone (not player-specific)
+        if (event.type === 'SELLING_SUMMARY') {
+          console.log(`📋 SELLING_SUMMARY event received!`);
+          console.log(`📋 Event data:`, event.data);
+          console.log(`📋 Summary:`, event.data.summary);
+          console.log(`📋 Round:`, event.data.round);
+          console.log(`📋 Setting selling summary popup state...`);
+          
+          setSellingSummaryPopup({
+            isOpen: true,
+            summary: event.data.summary,
+            round: event.data.round
+          });
+          
+          console.log(`📋 Selling summary popup state set!`);
         }
       });
 
@@ -566,6 +595,14 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
         card={resultPopup.card}
         title={resultPopup.title}
         message={resultPopup.message}
+      />
+
+      {/* Selling Summary Popup */}
+      <SellingSummaryPopup
+        isOpen={sellingSummaryPopup.isOpen}
+        onClose={() => setSellingSummaryPopup((prev: any) => ({ ...prev, isOpen: false }))}
+        summary={sellingSummaryPopup.summary}
+        round={sellingSummaryPopup.round}
       />
     </div>
   );

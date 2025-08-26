@@ -341,10 +341,28 @@ export function selectCardForSelling(gameState: GameState, playerId: string, car
     [playerId]: card
   };
 
-  const allSelected = Object.keys(updatedSelectedCards).length === gameState.players.length;
+  const selectedCount = Object.keys(updatedSelectedCards).length;
+  const totalPlayers = gameState.players.length;
+  const allSelected = selectedCount === totalPlayers;
+  
+  console.log(`🔍 selectCardForSelling: Player ${playerId} selected card ${cardId}`);
+  console.log(`🔍 Selected cards count: ${selectedCount} / ${totalPlayers}`);
+  console.log(`🔍 Selected cards:`, Object.keys(updatedSelectedCards));
+  console.log(`🔍 All players:`, gameState.players.map(p => p.id));
+  console.log(`🔍 All selected? ${allSelected}`);
 
   if (allSelected) {
-    return resolveSellingRound(gameState, updatedSelectedCards);
+    // Return state with allCardsSelected: true first, let the server handle the resolution
+    console.log(`✅ All cards selected! Returning state with allCardsSelected: true`);
+    return {
+      ...gameState,
+      sellingState: {
+        ...gameState.sellingState,
+        selectedCards: updatedSelectedCards,
+        allCardsSelected: true
+      },
+      lastActivity: new Date()
+    };
   }
 
   return {

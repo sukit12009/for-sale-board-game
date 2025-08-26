@@ -410,13 +410,18 @@ export default function handler(
           }
 
           const updatedGameState = selectCardForSelling(gameState, playerId, cardId);
+          
+          // Check if all players have selected cards BEFORE saving (because resolveSellingRound resets allCardsSelected)
+          const allCardsSelected = updatedGameState.sellingState?.allCardsSelected;
+          console.log(`🔍 Checking if all cards selected:`, allCardsSelected);
+          
           await saveGameState(updatedGameState);
           broadcastToPlayers(io, updatedGameState);
 
-          // Check if all players have selected cards (selling round complete)
-          if (updatedGameState.sellingState?.allCardsSelected) {
+          if (allCardsSelected) {
+            console.log(`✅ All cards selected! Starting selling summary process...`);
             // Send money received events to all players
-            const sellingState = updatedGameState.sellingState;
+            const sellingState = updatedGameState.sellingState!;
             const activeMoneyCards = updatedGameState.activeMoneyCards;
 
             // Sort players by selected card value (highest to lowest)
@@ -445,6 +450,129 @@ export default function handler(
                 }
               }
             });
+
+            // Send selling summary to all players after a short delay
+            setTimeout(() => {
+              console.log(`📋 Sending SELLING_SUMMARY event to all players`);
+              
+              // Prepare summary data
+              const sellingSummary = sortedSelections.map((selection, index) => {
+                const player = updatedGameState.players.find(p => p.id === selection.playerId);
+                const moneyCard = index < activeMoneyCards.length ? activeMoneyCards[index] : null;
+                
+                return {
+                  playerId: selection.playerId,
+                  playerName: player?.username || 'Unknown',
+                  propertyCard: selection.card,
+                  moneyCard: moneyCard,
+                  moneyReceived: moneyCard?.value || 0
+                };
+              });
+
+              // Send to all players (including spectators)
+              updatedGameState.players.forEach(player => {
+                const socketId = playerConnections.get(player.id);
+                if (socketId) {
+                  io.to(socketId).emit('game-event', {
+                    id: Date.now().toString(),
+                    gameId: gameState.id,
+                    type: 'SELLING_SUMMARY',
+                    data: { 
+                      summary: sellingSummary,
+                      round: updatedGameState.currentRound 
+                    },
+                    timestamp: new Date()
+                  });
+                  console.log(`📋 Selling summary sent to ${player.username}`);
+                }
+              });
+
+              // Send to spectators too
+              io.emit('game-event', {
+                id: Date.now().toString(),
+                gameId: gameState.id,
+                type: 'SELLING_SUMMARY',
+                data: { 
+                  summary: sellingSummary,
+                  round: updatedGameState.currentRound 
+                },
+                timestamp: new Date()
+              });
+            }, 2000); // 2 second delay to let individual MONEY_RECEIVED events show first
+
+            // After sending events, resolve the selling round
+            setTimeout(async () => {
+              console.log(`🔄 Resolving selling round after events sent...`);
+              try {
+                if (updatedGameState.sellingState) {
+                  // Manually resolve the selling round here instead of importing
+                  const sellingState = updatedGameState.sellingState;
+                  const selectedCards = sellingState.selectedCards;
+                  
+                  // Sort players by their card values (highest first)
+                  const sortedPlayers = Object.entries(selectedCards)
+                    .sort(([, a], [, b]) => b.value - a.value)
+                    .map(([playerId]) => playerId);
+
+                  // Sort money cards (highest first)
+                  const sortedMoneyCards = [...updatedGameState.activeMoneyCards].sort((a, b) => b.value - a.value);
+
+                  // Award money cards to players
+                  const updatedPlayers = updatedGameState.players.map(player => {
+                    const playerIndex = sortedPlayers.indexOf(player.id);
+                    if (playerIndex !== -1) {
+                      const moneyCard = sortedMoneyCards[playerIndex];
+                      const selectedCard = selectedCards[player.id];
+                      
+                      return {
+                        ...player,
+                        propertyCards: player.propertyCards.filter(c => c.id !== selectedCard.id),
+                        moneyCards: [...player.moneyCards, moneyCard]
+                      };
+                    }
+                    return player;
+                  });
+
+                  // Check if all property cards are sold
+                  const hasMoreCards = updatedPlayers.some(p => p.propertyCards.length > 0);
+                  
+                  let resolvedGameState;
+                  if (!hasMoreCards) {
+                    // Game finished
+                    resolvedGameState = {
+                      ...updatedGameState,
+                      players: updatedPlayers,
+                      phase: 'FINISHED' as const,
+                      lastActivity: new Date()
+                    };
+                  } else {
+                    // Prepare next selling round
+                    const nextMoneyCards = updatedGameState.moneyDeck.slice(0, updatedGameState.players.length);
+                    const remainingMoneyDeck = updatedGameState.moneyDeck.slice(updatedGameState.players.length);
+
+                    resolvedGameState = {
+                      ...updatedGameState,
+                      players: updatedPlayers,
+                      moneyDeck: remainingMoneyDeck,
+                      activeMoneyCards: nextMoneyCards,
+                      currentRound: updatedGameState.currentRound + 1,
+                      sellingState: {
+                        round: sellingState.round + 1,
+                        selectedCards: {},
+                        allCardsSelected: false
+                      },
+                      lastActivity: new Date()
+                    };
+                  }
+
+                  await saveGameState(resolvedGameState);
+                  broadcastToPlayers(io, resolvedGameState);
+                  console.log(`✅ Selling round resolved and saved`);
+                }
+              } catch (error) {
+                console.error('Error resolving selling round:', error);
+              }
+            }, 2500); // Resolve after summary is sent
           }
 
           // Check if game finished
