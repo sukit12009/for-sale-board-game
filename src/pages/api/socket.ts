@@ -20,7 +20,9 @@ import {
   placeBid,
   passPlayer,
   selectCardForSelling,
-  calculateFinalScores
+  calculateFinalScores,
+  getPassPlayerCard,
+  getWinnerCard
 } from '@/lib/gameLogic';
 
 interface SocketServer extends NetServer {
@@ -294,23 +296,97 @@ export default function handler(
         }
       });
 
-      // Pass Bid
-      socket.on('pass-bid', async (gameId) => {
-        try {
-          const gameState = await loadGameState(gameId);
-          if (!gameState) return;
+                  // Pass Bid
+            socket.on('pass-bid', async (gameId) => {
+              try {
+                console.log(`🎯 Pass bid received for game ${gameId}`);
+                const gameState = await loadGameState(gameId);
+                if (!gameState) {
+                  console.log(`❌ Game ${gameId} not found`);
+                  return;
+                }
+                console.log(`✅ Game loaded successfully`);
 
-          const playerId = Array.from(playerConnections.entries())
-            .find(([, socketId]) => socketId === socket.id)?.[0];
-          
-          if (!playerId) {
-            socket.emit('error', { message: 'ไม่พบผู้เล่น' });
-            return;
-          }
+                const playerId = Array.from(playerConnections.entries())
+                  .find(([, socketId]) => socketId === socket.id)?.[0];
 
-          const updatedGameState = passPlayer(gameState, playerId);
-          await saveGameState(updatedGameState);
-          broadcastToPlayers(io, updatedGameState);
+                if (!playerId) {
+                  console.log(`❌ Player not found for socket ${socket.id}`);
+                  socket.emit('error', { message: 'ไม่พบผู้เล่น' });
+                  return;
+                }
+                console.log(`✅ Player ID found: ${playerId}`);
+
+                console.log(`🎯 Player ${playerId} is passing bid`);
+
+                // Get the card before passing (for event)
+                console.log(`🔍 Getting card for pass event...`);
+                const cardToReceive = getPassPlayerCard(gameState, playerId);
+                console.log(`🔍 Card to receive:`, cardToReceive);
+
+                                // Check if this pass will end the auction BEFORE calling passPlayer
+                const currentBiddingState = gameState.biddingState!;
+                const currentPassedPlayers = [...currentBiddingState.passedPlayers, playerId];
+                const activePlayersBeforePass = currentBiddingState.biddingOrder.filter(id => !currentPassedPlayers.includes(id));
+                const willEndAuction = activePlayersBeforePass.length === 1;
+                const winnerId = willEndAuction ? activePlayersBeforePass[0] : null;
+                
+                console.log(`🔍 Will end auction: ${willEndAuction}, Winner: ${winnerId}`);
+
+                // Get winner card BEFORE calling passPlayer (while activePropertyCards still exist)
+                let winnerCard = null;
+                if (willEndAuction && gameState.activePropertyCards && gameState.activePropertyCards.length > 0) {
+                  winnerCard = gameState.activePropertyCards.reduce((highest, card) =>
+                    card.value > highest.value ? card : highest
+                  );
+                  console.log(`🎯 Winner will get card:`, winnerCard);
+                }
+
+                console.log(`🚀 About to call passPlayer function...`);
+                const updatedGameState = passPlayer(gameState, playerId);
+                console.log(`✅ passPlayer completed. New biddingState:`, updatedGameState.biddingState);
+                await saveGameState(updatedGameState);
+                broadcastToPlayers(io, updatedGameState);
+
+                // Send property won event to the player who passed
+                if (cardToReceive) {
+                  const socketId = playerConnections.get(playerId);
+                  console.log(`📨 Sending PROPERTY_WON event to ${playerId} (passed):`, cardToReceive);
+                  if (socketId) {
+                    io.to(socketId).emit('game-event', {
+                      id: Date.now().toString(),
+                      gameId: gameState.id,
+                      type: 'PROPERTY_WON',
+                      playerId: playerId,
+                      data: { card: cardToReceive, reason: 'passed' },
+                      timestamp: new Date()
+                    });
+                    console.log(`✅ Event sent to socket ${socketId}`);
+                  } else {
+                    console.log(`❌ No socket found for player ${playerId}`);
+                  }
+                } else {
+                  console.log(`❌ No card to receive for player ${playerId}`);
+                }
+
+                // Send winner event if auction ended
+                if (willEndAuction && winnerId && winnerCard) {
+                  const winnerSocketId = playerConnections.get(winnerId);
+                  console.log(`📨 Sending PROPERTY_WON event to ${winnerId} (winner):`, winnerCard);
+                  if (winnerSocketId) {
+                    io.to(winnerSocketId).emit('game-event', {
+                      id: Date.now().toString(),
+                      gameId: gameState.id,
+                      type: 'PROPERTY_WON',
+                      playerId: winnerId,
+                      data: { card: winnerCard, reason: 'won_auction' },
+                      timestamp: new Date()
+                    });
+                    console.log(`✅ Winner event sent to socket ${winnerSocketId}`);
+                  } else {
+                    console.log(`❌ No socket found for winner ${winnerId}`);
+                  }
+                }
 
         } catch (error) {
           console.error('Error passing bid:', error);
@@ -336,6 +412,40 @@ export default function handler(
           const updatedGameState = selectCardForSelling(gameState, playerId, cardId);
           await saveGameState(updatedGameState);
           broadcastToPlayers(io, updatedGameState);
+
+          // Check if all players have selected cards (selling round complete)
+          if (updatedGameState.sellingState?.allCardsSelected) {
+            // Send money received events to all players
+            const sellingState = updatedGameState.sellingState;
+            const activeMoneyCards = updatedGameState.activeMoneyCards;
+
+            // Sort players by selected card value (highest to lowest)
+            const sortedSelections = Object.entries(sellingState.selectedCards)
+              .map(([playerId, card]) => ({ playerId, card }))
+              .sort((a, b) => b.card.value - a.card.value);
+
+            // Assign money cards (highest property gets highest money)
+            sortedSelections.forEach((selection, index) => {
+              if (index < activeMoneyCards.length) {
+                const moneyCard = activeMoneyCards[index];
+                const socketId = playerConnections.get(selection.playerId);
+                console.log(`📨 Sending MONEY_RECEIVED event to ${selection.playerId}:`, moneyCard);
+                if (socketId) {
+                  io.to(socketId).emit('game-event', {
+                    id: Date.now().toString(),
+                    gameId: gameState.id,
+                    type: 'MONEY_RECEIVED',
+                    playerId: selection.playerId,
+                    data: { card: moneyCard, propertyCard: selection.card },
+                    timestamp: new Date()
+                  });
+                  console.log(`✅ Money event sent to socket ${socketId}`);
+                } else {
+                  console.log(`❌ No socket found for player ${selection.playerId}`);
+                }
+              }
+            });
+          }
 
           // Check if game finished
           if (updatedGameState.phase === 'FINISHED') {

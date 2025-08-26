@@ -105,8 +105,8 @@ export default function Home() {
 
   // Game Lobby
   if (appState === 'lobby' && username) {
-    return (
-      <div>
+  return (
+    <div>
         <GameLobby
           username={username}
           onCreateGame={handleCreateGame}
@@ -128,7 +128,7 @@ export default function Home() {
   // Game Screen
   if (appState === 'game' && username) {
     return (
-      <div>
+        <div>
         <GameBoard
           username={username}
           gameId={gameConfig.gameId}
@@ -144,13 +144,13 @@ export default function Home() {
         </button>
         
         {/* Logout Button */}
-        <button
-          onClick={handleLogout}
+          <button
+            onClick={handleLogout}
           className="fixed top-4 right-4 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm transition-colors duration-200 z-50"
-        >
-          ออกจากระบบ
-        </button>
-      </div>
+          >
+            ออกจากระบบ
+          </button>
+        </div>
     );
   }
 

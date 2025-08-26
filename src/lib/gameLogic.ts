@@ -208,6 +208,10 @@ export function passPlayer(gameState: GameState, playerId: string): GameState {
   const updatedPassedPlayers = [...biddingState.passedPlayers, playerId];
   const activePlayers = biddingState.biddingOrder.filter(id => !updatedPassedPlayers.includes(id));
   
+  console.log(`🔍 passPlayer: Original passedPlayers:`, biddingState.passedPlayers);
+  console.log(`🔍 passPlayer: Updated passedPlayers:`, updatedPassedPlayers);
+  console.log(`🔍 passPlayer: Active players remaining:`, activePlayers.length, activePlayers);
+  
   // Give player the lowest property card and half their bid back
   const lowestCard = gameState.activePropertyCards.reduce((lowest, card) => 
     card.value < lowest.value ? card : lowest
@@ -443,4 +447,48 @@ export function calculateFinalScores(gameState: GameState): GameResult[] {
   });
 
   return results;
+}
+
+// Helper functions to extract events from game state changes
+export function getPassPlayerCard(gameState: GameState, playerId: string): PropertyCard | null {
+  if (gameState.phase !== 'BUYING' || !gameState.biddingState) {
+    console.log(`❌ getPassPlayerCard: Invalid phase or no bidding state`);
+    return null;
+  }
+  
+  const player = gameState.players.find(p => p.id === playerId);
+  if (!player) {
+    console.log(`❌ getPassPlayerCard: Player ${playerId} not found`);
+    return null;
+  }
+  
+  if (gameState.activePropertyCards.length === 0) {
+    console.log(`❌ getPassPlayerCard: No active property cards`);
+    return null;
+  }
+  
+  // Return the lowest property card (what player gets when passing)
+  const lowestCard = gameState.activePropertyCards.reduce((lowest, card) => 
+    card.value < lowest.value ? card : lowest
+  );
+  
+  console.log(`✅ getPassPlayerCard: Player ${playerId} will get card ${lowestCard.value}`);
+  return lowestCard;
+}
+
+export function getWinnerCard(gameState: GameState): { winnerId: string; card: PropertyCard } | null {
+  if (gameState.phase !== 'BUYING' || !gameState.biddingState) return null;
+  
+  const biddingState = gameState.biddingState;
+  if (!biddingState.highestBidder) return null;
+  
+  // Return the highest property card (what winner gets)
+  const highestCard = gameState.activePropertyCards.reduce((highest, card) => 
+    card.value > highest.value ? card : highest
+  );
+  
+  return {
+    winnerId: biddingState.highestBidder,
+    card: highestCard
+  };
 } 

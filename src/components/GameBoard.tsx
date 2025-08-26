@@ -13,6 +13,7 @@ import {
 } from '@/types/game';
 import { PropertyCardComponent, MoneyCardComponent, EmptyCardSlot } from './GameCard';
 import { PlayerList, PlayerSummary } from './PlayerInfo';
+import ResultPopup from './ResultPopup';
 
 interface GameBoardProps {
   username: string;
@@ -31,14 +32,34 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [error, setError] = useState<string>('');
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  
+  // Result Popup State
+  const [resultPopup, setResultPopup] = useState<{
+    isOpen: boolean;
+    type: 'property' | 'money';
+    card: any;
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    type: 'property',
+    card: null,
+    title: '',
+    message: ''
+  });
 
   // Initialize Socket Connection
   useEffect(() => {
+    console.log('🚨 [DEBUG] Initializing Socket.IO connection...');
+    
     const socketInstance = io({
-      path: '/api/socket'
+      path: '/api/socket',
+      forceNew: true,
+      transports: ['polling', 'websocket']
     });
 
     socketInstance.on('connect', () => {
+      console.log('🔌 Socket connected successfully!', socketInstance.id);
       setConnectionStatus('connected');
       setSocket(socketInstance);
       
@@ -52,6 +73,10 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
         console.log('Creating new game...');
         socketInstance.emit('create-game', { username, maxPlayers: 6, autoStart: false });
       }
+    });
+
+    socketInstance.on('connect_error', (error) => {
+      console.error('🚨 [DEBUG] Socket connection error:', error);
     });
 
     socketInstance.on('disconnect', () => {
@@ -82,34 +107,128 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
       }
     });
 
-    socketInstance.on('game-state-updated', (newGameState) => {
-      console.log('Game state updated:', newGameState);
-      setGameState(newGameState);
-      setIsReconnecting(false);
-      
-      // Find self player ID
-      const self = newGameState.players.find((p: any) => p.username === username);
-      if (self) {
-        setSelfPlayerId(self.id);
-      }
-    });
+          socketInstance.on('game-state-updated', (newGameState) => {
+        console.log('Game state updated:', newGameState);
+        setGameState(newGameState);
+        setIsReconnecting(false);
+        
+        // Find self player ID
+        const self = newGameState.players.find((p: any) => p.username === username);
+        if (self) {
+          console.log(`🔍 Setting selfPlayerId: ${self.id} for username: ${username}`);
+          setSelfPlayerId(self.id);
+          // Store in localStorage as backup
+          localStorage.setItem(`playerId_${username}`, self.id);
+        }
+      });
 
     socketInstance.on('spectator-update', (data) => {
       console.log('Spectator update:', data);
       setSpectatorData(data);
     });
 
-    socketInstance.on('game-event', (event) => {
-      console.log('Game event:', event);
-      if (event.type === 'GAME_FINISHED') {
-        setGameResults(event.data.results);
-      }
-      
-      // Show reconnection message
-      if (event.type === 'PLAYER_RECONNECTED' && event.data.username === username) {
-        console.log('Successfully reconnected to game!');
-      }
-    });
+          // Register game-event listener FIRST
+      console.log('🚨 [DEBUG] Registering game-event listener...');
+      socketInstance.on('game-event', (event) => {
+        console.log('🚨 [DEBUG] game-event listener fired!');
+        console.log('🚨 [DEBUG] Raw event:', event);
+        console.log('🚨 [DEBUG] Event type:', event?.type);
+        console.log('🚨 [DEBUG] Event playerId:', event?.playerId);
+        console.log('🚨 [DEBUG] Current selfPlayerId:', selfPlayerId);
+        
+        if (event.type === 'GAME_FINISHED') {
+          setGameResults(event.data.results);
+        }
+        
+        // Show reconnection message
+        if (event.type === 'PLAYER_RECONNECTED' && event.data.username === username) {
+          console.log('Successfully reconnected to game!');
+        }
+
+        // Show result popups for current player
+        console.log(`🎮 Game event received:`, event);
+        console.log(`🔍 selfPlayerId: "${selfPlayerId}", event.playerId: "${event.playerId}"`);
+        
+        // Debug username and player matching
+        console.log(`🔍 Looking for player with username: "${username}"`);
+        console.log(`🔍 gameState:`, !!gameState);
+        console.log(`🔍 gameState.players:`, gameState?.players);
+        console.log(`🔍 Available players:`, gameState?.players?.map((p: any) => ({ id: p.id, username: p.username })));
+        
+        // Try to find player in current gameState
+        const currentPlayer = gameState?.players?.find((p: any) => p.username === username);
+        
+        // Alternative: Check if the event is for current user directly
+        // Since we know the username, we can store playerId when we get game-state-updated
+        const storedPlayerId = localStorage.getItem(`playerId_${username}`);
+        
+        console.log(`🔍 currentPlayer:`, currentPlayer);
+        console.log(`🔍 storedPlayerId:`, storedPlayerId);
+        
+        // Use multiple fallbacks to determine if this event is for current player
+        const isForCurrentPlayer = 
+          event.playerId === selfPlayerId ||           // Primary check
+          event.playerId === currentPlayer?.id ||      // Username match
+          event.playerId === storedPlayerId;           // Stored playerId
+        
+        console.log(`🔍 Event for current player? ${isForCurrentPlayer} (${event.playerId} matches any of: selfPlayerId="${selfPlayerId}", currentPlayer.id="${currentPlayer?.id}", stored="${storedPlayerId}")`);
+        
+        console.log(`🔍 currentPlayer:`, currentPlayer);
+        console.log(`🔍 currentPlayer?.id:`, currentPlayer?.id);
+        console.log(`🔍 selfPlayerId comparison: "${event.playerId}" === "${selfPlayerId}" = ${event.playerId === selfPlayerId}`);
+        console.log(`🔍 currentPlayer comparison: "${event.playerId}" === "${currentPlayer?.id}" = ${event.playerId === currentPlayer?.id}`);
+        console.log(`🔍 isForCurrentPlayer:`, isForCurrentPlayer);
+        
+        if (isForCurrentPlayer) {
+          console.log(`✅ Event is for current player!`);
+          console.log(`🔍 Checking event type: "${event.type}"`);
+          console.log(`🔍 Checking event.data:`, event.data);
+          console.log(`🔍 Checking event.data.card:`, event.data?.card);
+          
+          if (event.type === 'PROPERTY_WON') {
+            console.log(`✅ Event type is PROPERTY_WON`);
+            
+            if (event.data.card) {
+              console.log(`✅ Event has card data`);
+              console.log(`🏠 Showing property popup:`, event.data.card);
+              console.log(`🏠 Card data:`, JSON.stringify(event.data.card));
+              
+              const newPopupState = {
+                isOpen: true,
+                type: 'property' as const,
+                card: event.data.card,
+                title: 'ได้รับบ้านใหม่! 🏠',
+                message: event.data.reason === 'passed' ? 'คุณได้รับบ้านจากการยอมแพ้!' : 'คุณเป็นผู้ชนะการประมูล!'
+              };
+              
+                          console.log(`🏠 Setting popup state:`, newPopupState);
+            setResultPopup(newPopupState);
+            
+            // Check if state was set
+            setTimeout(() => {
+              console.log(`🏠 Popup should be visible now!`);
+            }, 100);
+            } else {
+              console.log(`❌ Event has no card data`);
+            }
+          } else {
+            console.log(`❌ Event type is not PROPERTY_WON: "${event.type}"`);
+          }
+          
+          if (event.type === 'MONEY_RECEIVED' && event.data.card) {
+            console.log(`💰 Showing money popup:`, event.data.card);
+            setResultPopup({
+              isOpen: true,
+              type: 'money',
+              card: event.data.card,
+              title: 'ได้รับเช็คเงิน! 💰',
+              message: 'คุณขายบ้านสำเร็จ!'
+            });
+          }
+        } else {
+          console.log(`❌ Event not for current player (${event.playerId} !== ${selfPlayerId})`);
+        }
+      });
 
     socketInstance.on('reconnected', (data) => {
       console.log('Reconnection successful:', data);
@@ -178,8 +297,16 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
   }, [socket, gameState, bidAmount]);
 
   const passBid = useCallback(() => {
+    console.log('🚨 [DEBUG] passBid called!');
+    console.log('🚨 [DEBUG] socket:', !!socket);
+    console.log('🚨 [DEBUG] gameState:', !!gameState);
+    console.log('🚨 [DEBUG] gameState.id:', gameState?.id);
+    
     if (socket && gameState) {
+      console.log(`🚨 [DEBUG] Emitting pass-bid for game ${gameState.id}`);
       socket.emit('pass-bid', gameState.id);
+    } else {
+      console.log('🚨 [DEBUG] Cannot emit pass-bid: missing socket or gameState');
     }
   }, [socket, gameState]);
 
@@ -430,6 +557,16 @@ export default function GameBoard({ username, gameId, isSpectator = false }: Gam
           </div>
         </div>
       </div>
+
+      {/* Result Popup */}
+      <ResultPopup
+        isOpen={resultPopup.isOpen}
+        onClose={() => setResultPopup((prev: any) => ({ ...prev, isOpen: false }))}
+        type={resultPopup.type}
+        card={resultPopup.card}
+        title={resultPopup.title}
+        message={resultPopup.message}
+      />
     </div>
   );
 }

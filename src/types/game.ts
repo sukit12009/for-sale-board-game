@@ -96,6 +96,7 @@ export type GameEventType =
   | 'BID_PLACED'
   | 'PLAYER_PASSED'
   | 'PROPERTY_WON'
+  | 'MONEY_RECEIVED'
   | 'CARDS_SELECTED'
   | 'ROUND_COMPLETED'
   | 'GAME_FINISHED'
