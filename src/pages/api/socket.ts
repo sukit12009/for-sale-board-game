@@ -123,6 +123,22 @@ export default function handler(
 
     io.on('connection', (socket) => {
       console.log('New client connected:', socket.id);
+      
+      // Global error handler for this socket
+      socket.on('error', (error) => {
+        console.error('Socket error:', error);
+      });
+      
+      socket.on('disconnect', (reason) => {
+        console.log('Client disconnected:', socket.id, 'Reason:', reason);
+        // Clean up player connections
+        const disconnectedPlayerId = Array.from(playerConnections.entries())
+          .find(([, socketId]) => socketId === socket.id)?.[0];
+        if (disconnectedPlayerId) {
+          playerConnections.delete(disconnectedPlayerId);
+          console.log('Cleaned up connection for player:', disconnectedPlayerId);
+        }
+      });
 
       // Create Game
       socket.on('create-game', async (data) => {
@@ -151,13 +167,31 @@ export default function handler(
       socket.on('join-game', async (data) => {
         try {
           console.log(`🔍 Raw join data:`, data);
+          
+          // Validate input data
+          if (!data || !data.gameId || !data.username) {
+            console.log(`❌ Invalid join data:`, data);
+            socket.emit('error', { 
+              message: 'ข้อมูลไม่ถูกต้อง', 
+              code: 'INVALID_DATA' 
+            });
+            return;
+          }
+          
           const { gameId, username, isSpectator = false } = data;
           console.log(`🔍 Parsed: gameId=${gameId}, username=${username}, isSpectator=${isSpectator} (type: ${typeof isSpectator})`);
           
           const gameState = await loadGameState(gameId);
           if (!gameState) {
             console.log(`❌ Game ${gameId} not found`);
-            socket.emit('error', { message: 'ไม่พบเกม', code: 'GAME_NOT_FOUND' });
+            try {
+              socket.emit('error', { 
+                message: 'ไม่พบเกม', 
+                code: 'GAME_NOT_FOUND' 
+              });
+            } catch (emitError) {
+              console.error('Failed to emit error:', emitError);
+            }
             return;
           }
 
@@ -241,10 +275,20 @@ export default function handler(
           
         } catch (error) {
           console.error('Error in join-game:', error);
-          socket.emit('error', { 
-            message: 'ไม่สามารถเข้าร่วมเกมได้',
-            code: 'JOIN_ERROR'
-          });
+          try {
+            socket.emit('error', { 
+              message: 'ไม่สามารถเข้าร่วมเกมได้',
+              code: 'JOIN_ERROR'
+            });
+          } catch (emitError) {
+            console.error('Failed to emit error:', emitError);
+            // Try to disconnect socket if emit fails
+            try {
+              socket.disconnect();
+            } catch (disconnectError) {
+              console.error('Failed to disconnect socket:', disconnectError);
+            }
+          }
         }
       });
 
